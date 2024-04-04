@@ -3,27 +3,43 @@ package instance
 
 import (
 	"errors"
-	"load-balancer/config"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"sync"
+
+	"my.go/load-balancer/config"
+)
+
+var (
+	logger = log.New(log.Writer(), "INSTANCE", log.Lshortfile)
 )
 
 type LoadBalancer interface {
+	// get list of available backends.
 	GetBackends() ([]config.Backend, error)
+	// get next peer which decide where the request will be proceed to,
+	// this is practically the implementation of existing load balancing algorithms.
 	GetNextPeer() (config.Backend, error)
-	ProcessRequest(config.Backend)
+	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 
 // load balancer with round robin implementation.
 type RoundRobinLoadBalancer struct {
-	Config config.LoadBalancerConfig
-	currentBackend config.Backend
-	m sync.RWMutex
+	Config              config.LoadBalancerConfig
+	currentBackendIndex int
+	m                   sync.RWMutex
 }
 
-func NewRoundRobinLoadBalancer(config config.LoadBalancerConfig) *RoundRobinLoadBalancer {
-	return &RoundRobinLoadBalancer{
-		Config: config,
+func (lb *RoundRobinLoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	backend, err := lb.GetNextPeer()
+	if err != nil {
+		w.Write(JsonResponse(http.StatusInternalServerError, "can't serve requests at the moment"))
+		logger.Fatal(err)
 	}
+
+	backend.ReverseProxy.ServeHTTP(w, r)
 }
 
 func (lb *RoundRobinLoadBalancer) GetBackends() ([]config.Backend, error) {
@@ -46,24 +62,39 @@ func (lb *RoundRobinLoadBalancer) GetNextPeer() (config.Backend, error) {
 		return config.NilBackend(), errors.New("no backend found")
 	}
 
-	for i, b := range backends {
-		if b == lb.currentBackend {
+	for i := range backends {
+		if i == lb.currentBackendIndex {
 			lb.m.Lock()
-			defer lb.m.Unlock()
-			if i + 1 < len(backends) {
-				lb.currentBackend = backends[i + 1]
-				return lb.currentBackend, nil
-			} else {
-				lb.currentBackend = backends[0]
-				return lb.currentBackend, nil
-			}
+			lb.currentBackendIndex = (i + 1) % len(backends)
+			lb.m.Unlock()
+			return backends[i], nil
 		}
 	}
 
-	lb.currentBackend = backends[0]
-	return lb.currentBackend, nil
+	return backends[0], nil
 }
 
-func (lb *RoundRobinLoadBalancer) ProcessRequest(config.Backend) {
-	
+func parseUrl(raw string) *url.URL {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	return parsed
+}
+
+func NewRoundRobinLoadBalancer(config config.LoadBalancerConfig) *RoundRobinLoadBalancer {
+	rrlb := &RoundRobinLoadBalancer{
+		Config: config,
+		m:      sync.RWMutex{},
+	}
+	c, err := rrlb.Config.GetConfig()
+	if err == nil {
+		for i := range c.Backends {
+			this := &c.Backends[i]
+			this.ReverseProxy = httputil.NewSingleHostReverseProxy(parseUrl(this.Url))
+			c.Backends[i] = *this
+		}
+		rrlb.Config.SetConfig(*c)
+	}
+	return rrlb
 }

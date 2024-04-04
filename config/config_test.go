@@ -1,12 +1,12 @@
 package config_test
 
 import (
-	"load-balancer/config"
+	"my.go/load-balancer/config"
 	"testing"
 )
 
 const (
-	filepath = "config.json"
+	filepath = "../config.json"
 )
 
 var (

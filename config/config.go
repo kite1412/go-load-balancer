@@ -3,14 +3,22 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httputil"
 	"os"
+	"sync"
 )
 
 type Backend struct {
 	Url  string `json:"url"`
 	Port int    `json:"port"`
+	ReverseProxy *httputil.ReverseProxy `json:"-"`
 }
 
+func NilBackend() Backend {
+	return Backend{}
+}
+
+// struct representation of json config file.
 type Config struct {
 	PortLowerLimit int       `json:"port_lower_limit"`
 	PortUpperLimit int       `json:"port_upper_limit"`
@@ -19,13 +27,13 @@ type Config struct {
 
 func (c Config) Equal(another Config) bool {
 	if c.PortLowerLimit != another.PortLowerLimit ||
-	 c.PortUpperLimit != another.PortUpperLimit ||
-	 len(c.Backends) != len(another.Backends) {
+		c.PortUpperLimit != another.PortUpperLimit ||
+		len(c.Backends) != len(another.Backends) {
 		return false
 	}
 
 	for index, b := range c.Backends {
-		if another.Backends[index] != b {
+		if another.Backends[index].Url != b.Url && another.Backends[index].Port != b.Port {
 			return false
 		}
 	}
@@ -54,7 +62,8 @@ type Default struct {
 	// accessing this field is never recommended, use GetConfig instead.
 	// just make sure to access this field only when there's no on-going modification
 	// of the config file.
-	Config         Config
+	Config Config
+	m      sync.Mutex
 }
 
 func DefaultConfig(filepath string, ll int, ul int) (*Default, error) {
@@ -75,11 +84,22 @@ func (c *Default) initConfig() error {
 		PortUpperLimit: c.PortUpperLimit,
 		Backends:       make([]Backend, 0),
 	}
+	if _, err := os.Stat(c.Filepath); err == nil {
+		con, e := c.GetConfig()
+		if e != nil {
+			fmt.Println(e)
+			return e
+		}
+		c.Config = *con
+		return nil
+	}
 	_, err := c.SetConfig(con)
 	return err
 }
 
 func (c *Default) SetConfig(newConf Config) (*Config, error) {
+	c.m.Lock()
+	defer c.m.Unlock()
 	json, err := json.Marshal(newConf)
 	if err != nil {
 		fmt.Println("fail to create a json")
@@ -92,6 +112,8 @@ func (c *Default) SetConfig(newConf Config) (*Config, error) {
 		return nil, err
 	}
 	c.Config = newConf
+	c.PortLowerLimit = c.Config.PortLowerLimit
+	c.PortUpperLimit = c.Config.PortUpperLimit
 	return &newConf, nil
 }
 
@@ -101,13 +123,17 @@ func (c *Default) GetConfig() (*Config, error) {
 		fmt.Println(err)
 		return nil, err
 	}
+	prevC := c.Config
 	cfg := Config{}
 	if err := json.Unmarshal(con, &cfg); err != nil {
 		fmt.Println(err)
 		return nil, err
 	}
+	copy(cfg.Backends, prevC.Backends)
 	if !cfg.Equal(c.Config) {
+		c.m.Lock()
 		c.Config = cfg
+		c.m.Unlock()
 	}
 	return &cfg, nil
 }
@@ -126,7 +152,7 @@ func (c *Default) AddBackend(newB Backend) {
 	c.SetConfig(*con)
 }
 
-func (c *Default) AddBackends(backends... Backend) {
+func (c *Default) AddBackends(backends ...Backend) {
 	con := &c.Config
 	con.Backends = append(con.Backends, backends...)
 	c.SetConfig(*con)
