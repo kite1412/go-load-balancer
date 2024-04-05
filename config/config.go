@@ -3,14 +3,22 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 	"net/http/httputil"
 	"os"
 	"sync"
+	"time"
+)
+
+var (
+	logger = log.New(log.Writer(), "CONFIG", log.Lshortfile)
 )
 
 type Backend struct {
-	Url  string `json:"url"`
-	Port int    `json:"port"`
+	Url          string                 `json:"url"`
+	Port         int                    `json:"port"`
+	IsAlive      bool                   `json:"is_alive"`
 	ReverseProxy *httputil.ReverseProxy `json:"-"`
 }
 
@@ -63,7 +71,7 @@ type Default struct {
 	// just make sure to access this field only when there's no on-going modification
 	// of the config file.
 	Config Config
-	m      sync.Mutex
+	m      sync.RWMutex
 }
 
 func DefaultConfig(filepath string, ll int, ul int) (*Default, error) {
@@ -75,7 +83,25 @@ func DefaultConfig(filepath string, ll int, ul int) (*Default, error) {
 	if err := c.initConfig(); err != nil {
 		return nil, err
 	}
+	go c.pingBackends()
 	return c, nil
+}
+
+func (c *Default) pingBackends() {
+	for {
+		logger.Println("Sending ping to all backends")
+		backends := c.Config.Backends
+		for i, b := range backends {
+			_, err := http.Get(b.Url)
+			if err != nil {
+				c.Config.Backends[i].IsAlive = false
+			} else {
+				c.Config.Backends[i].IsAlive = true
+			}
+		}
+		c.SetConfig(c.Config)
+		<-time.NewTicker(time.Minute).C
+	}
 }
 
 func (c *Default) initConfig() error {

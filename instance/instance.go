@@ -2,7 +2,6 @@
 package instance
 
 import (
-	"errors"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -10,6 +9,7 @@ import (
 	"sync"
 
 	"my.go/load-balancer/config"
+	"my.go/load-balancer/lberror"
 )
 
 var (
@@ -35,7 +35,11 @@ type RoundRobinLoadBalancer struct {
 func (lb *RoundRobinLoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend, err := lb.GetNextPeer()
 	if err != nil {
-		w.Write(JsonResponse(http.StatusInternalServerError, "can't serve requests at the moment"))
+		w.Write(
+			JsonResponse(
+				http.StatusInternalServerError, 
+				err.Error(),
+			))
 		logger.Fatal(err)
 	}
 
@@ -59,19 +63,22 @@ func (lb *RoundRobinLoadBalancer) GetNextPeer() (config.Backend, error) {
 	}
 
 	if len(backends) == 0 {
-		return config.NilBackend(), errors.New("no backend found")
+		return config.NilBackend(), lberror.NoBackendFoundError("no backend found.")
 	}
 
-	for i := range backends {
+	for i, b := range backends {
 		if i == lb.currentBackendIndex {
-			lb.m.Lock()
+			if b.IsAlive {
+				lb.m.Lock()
+				lb.currentBackendIndex = (i + 1) % len(backends)
+				lb.m.Unlock()
+				return backends[i], nil
+			} 
 			lb.currentBackendIndex = (i + 1) % len(backends)
-			lb.m.Unlock()
-			return backends[i], nil
 		}
 	}
 
-	return backends[0], nil
+	return config.NilBackend(), lberror.NoBackendFoundError("no server can handle the request at the moment.")
 }
 
 func parseUrl(raw string) *url.URL {
