@@ -6,6 +6,7 @@ import (
 
 	"my.go/load-balancer/config"
 	"my.go/load-balancer/instance"
+	"my.go/load-balancer/state"
 )
 
 var (
@@ -17,6 +18,7 @@ func main() {
 	if err != nil {
 		logger.Fatal(err)
 	}
-	roundRobinPool := instance.NewRoundRobinLoadBalancer(conf)
-	http.ListenAndServe(":8080", roundRobinPool)
+	state.InitLoadBalancer(instance.NewRoundRobinLoadBalancer(conf))
+	lb, _ := state.GetLoadBalancer()
+	http.ListenAndServe(":8080", lb)
 }
