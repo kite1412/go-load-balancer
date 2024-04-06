@@ -1,13 +1,13 @@
-module my.go/load-balancer/instance
+module my.go/loadbalancer/instance
 
 go 1.22.1
 
 require (
-    my.go/load-balancer/config v1.0.0
-    my.go/load-balancer/lberror v1.0.0
+    my.go/loadbalancer/config v1.0.0
+    my.go/loadbalancer/lberror v1.0.0
 )
 
 replace (
-    my.go/load-balancer/config => ../config
-    my.go/load-balancer/lberror => ../lberror
+    my.go/loadbalancer/config => ../config
+    my.go/loadbalancer/lberror => ../lberror
 )

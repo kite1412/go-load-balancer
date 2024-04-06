@@ -27,13 +27,16 @@ func NilBackend() Backend {
 }
 
 // struct representation of json config file.
+// config file SHOULD NOT be manually-edited, as it
+// fully managed by the program.
 type Config struct {
+	IsAlive        bool      `json:"is_alive"`
 	PortLowerLimit int       `json:"port_lower_limit"`
 	PortUpperLimit int       `json:"port_upper_limit"`
 	Backends       []Backend `json:"backends"`
 }
 
-func (c Config) Equal(another Config) bool {
+func (c Config) Equals(another Config) bool {
 	if c.PortLowerLimit != another.PortLowerLimit ||
 		c.PortUpperLimit != another.PortUpperLimit ||
 		len(c.Backends) != len(another.Backends) {
@@ -67,11 +70,7 @@ type Default struct {
 	Filepath       string
 	PortLowerLimit int
 	PortUpperLimit int
-	// accessing this field is never recommended, use GetConfig instead.
-	// just make sure to access this field only when there's no on-going modification
-	// of the config file.
-	config Config
-	m      sync.RWMutex
+	m              sync.RWMutex
 }
 
 func DefaultConfig(filepath string, ll int, ul int) (*Default, error) {
@@ -95,22 +94,27 @@ func (c *Default) pingBackends() {
 		if err != nil {
 			fmt.Println(err.Error())
 		}
-		if len(con.Backends) != 0 {
-			logger.Println("<<<SENDING PING TO ALL BACKENDS>>>")
-			backends := con.Backends
-			for i, b := range backends {
-				_, err := http.Get(b.Url)
-				if err != nil {
-					con.Backends[i].IsAlive = false
-				} else {
-					con.Backends[i].IsAlive = true
+		if con.IsAlive {
+			if len(con.Backends) != 0 {
+				logger.Println("<<<SENDING PING TO ALL BACKENDS>>>")
+				backends := con.Backends
+				for i, b := range backends {
+					_, err := http.Get(b.Url)
+					if err != nil {
+						con.Backends[i].IsAlive = false
+					} else {
+						con.Backends[i].IsAlive = true
+					}
 				}
+				c.SetConfig(*con)
+			} else {
+				logger.Println("<<<NO BACKEND INSTANCES>>>")
 			}
-			c.SetConfig(*con)
+			<-time.NewTicker(time.Minute).C
 		} else {
-			logger.Println("<<<NO BACKEND INSTANCES>>>")
+			logger.Println("Waiting for server...")
+			<-time.NewTicker(time.Second * 3).C
 		}
-		<- time.NewTicker(time.Minute).C
 	}
 }
 
@@ -123,10 +127,13 @@ func (c *Default) initConfig() error {
 	if _, err := os.Stat(c.Filepath); err == nil {
 		con, e := c.GetConfig()
 		if e != nil {
-			fmt.Println(e)
+			logger.Println(e)
 			return e
 		}
-		c.config = *con
+		if con.IsAlive {
+			con.IsAlive = false
+			c.SetConfig(*con)
+		}
 		return nil
 	}
 	_, err := c.SetConfig(con)
@@ -147,9 +154,8 @@ func (c *Default) SetConfig(newConf Config) (*Config, error) {
 		fmt.Println(err)
 		return nil, err
 	}
-	c.config = newConf
-	c.PortLowerLimit = c.config.PortLowerLimit
-	c.PortUpperLimit = c.config.PortUpperLimit
+	c.PortLowerLimit = newConf.PortLowerLimit
+	c.PortUpperLimit = newConf.PortUpperLimit
 	return &newConf, nil
 }
 
@@ -159,17 +165,10 @@ func (c *Default) GetConfig() (*Config, error) {
 		fmt.Println(err)
 		return nil, err
 	}
-	prevC := c.config
 	cfg := Config{}
 	if err := json.Unmarshal(con, &cfg); err != nil {
 		fmt.Println(err)
 		return nil, err
-	}
-	copy(cfg.Backends, prevC.Backends)
-	if !cfg.Equal(c.config) {
-		c.m.Lock()
-		c.config = cfg
-		c.m.Unlock()
 	}
 	return &cfg, nil
 }
@@ -183,13 +182,21 @@ func (c *Default) GetPortUpperLimit() int {
 }
 
 func (c *Default) AddBackend(newB Backend) {
-	con := &c.config
+	con, err := c.GetConfig()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	con.Backends = append(con.Backends, newB)
 	c.SetConfig(*con)
 }
 
 func (c *Default) AddBackends(backends ...Backend) {
-	con := &c.config
+	con, err := c.GetConfig()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	con.Backends = append(con.Backends, backends...)
 	c.SetConfig(*con)
 }

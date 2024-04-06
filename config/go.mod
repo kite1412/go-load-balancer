@@ -1,7 +1,7 @@
-module my.go/load-balancer/config
+module my.go/loadbalancer/config
 
 go 1.22.1
 
-require my.go/load-balancer/lberror v1.0.0
+require my.go/loadbalancer/lberror v1.0.0
 
-replace my.go/load-balancer/lberror => ../lberror
+replace my.go/loadbalancer/lberror => ../lberror

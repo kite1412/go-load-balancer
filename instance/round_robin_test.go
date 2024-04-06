@@ -1,8 +1,8 @@
 package instance_test
 
 import (
-	"my.go/load-balancer/config"
-	"my.go/load-balancer/instance"
+	"my.go/loadbalancer/config"
+	"my.go/loadbalancer/instance"
 	"testing"
 )
 

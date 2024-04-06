@@ -1,4 +1,4 @@
-// app-specifif errors.
+// app-specific errors.
 package lberror
 
 // error when generating port.
@@ -38,17 +38,4 @@ func (e noBackendFoundError) Error() string {
 
 func NoBackendFoundError(message string) error {
 	return noBackendFoundError{m: message}
-}
-
-// error when accessing nil-value state.
-type stateNotInstantiatedError struct {
-	m string
-}
-
-func (e stateNotInstantiatedError) Error() string {
-	return e.m
-}
-
-func StateNotInstantiatedError(message string) error {
-	return stateNotInstantiatedError{m: message}
 }

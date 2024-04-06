@@ -1,10 +1,16 @@
 {
+    "is_alive": false,
     "port_lower_limit": 8081,
     "port_upper_limit": 8090,
     "backends": [
         {
             "url": "http://localhost:8081",
             "port": 8081,
+            "is_alive": false
+        },
+        {
+            "url": "http://localhost:8082",
+            "port": 8082,
             "is_alive": false
         }
     ]

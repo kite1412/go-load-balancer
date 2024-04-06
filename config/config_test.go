@@ -1,7 +1,7 @@
 package config_test
 
 import (
-	"my.go/load-balancer/config"
+	"my.go/loadbalancer/config"
 	"testing"
 )
 
