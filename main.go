@@ -1,11 +1,10 @@
 package main
 
 import (
-	"my.go/loadbalancer/loadbalancer"
+	"my.go/loadbalancer"
 )
 
-// create a new load balancer instance with round robin algorithm.
 func main() {
-	lb := loadbalancer.RoundRobin()
+	lb := loadbalancer.DefaultRoundRobin()
 	lb.Start(":8080")
 }

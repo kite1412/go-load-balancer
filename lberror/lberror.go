@@ -1,7 +1,7 @@
-// app-specific errors.
+// App-specific errors.
 package lberror
 
-// error when generating port.
+// Error when generating port.
 type generatePortError struct {
 	m string
 }
@@ -14,7 +14,7 @@ func GeneratePortError(message string) error {
 	return generatePortError{m: message}
 }
 
-// error when trying to access lb config file.
+// Error when trying to access lb config file.
 type configFileError struct {
 	m string
 }
@@ -27,7 +27,7 @@ func ConfigFileError(message string) error {
 	return configFileError{m: message}
 }
 
-// error when no backend available to handle request.
+// Error when no backend available to handle request.
 type noBackendFoundError struct {
 	m string
 }

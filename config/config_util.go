@@ -8,7 +8,7 @@ import (
 	"my.go/loadbalancer/lberror"
 )
 
-// return the absolute path of the lb config file.
+// Return the absolute path of the lb config file.
 // the env variable which this func look up to is 'lb-config'.
 func LBConfigAbs() (string, error) {
 	absPath := os.Getenv("lb-config")
@@ -21,7 +21,7 @@ func LBConfigAbs() (string, error) {
 	return absPath, nil
 }
 
-// return the port lower and upper limit.
+// Return the port lower and upper limit.
 // the env variable which this func look up to is 'll-ul'
 // with value being lower limit and upper limit splitted with comma,
 // e.g. "'lowerlimit','upperlimit'".

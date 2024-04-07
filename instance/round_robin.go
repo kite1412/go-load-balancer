@@ -1,8 +1,6 @@
-// contract and implementations of load balancer.
 package instance
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -17,9 +15,9 @@ import (
 	"my.go/loadbalancer/lberror"
 )
 
-// load balancer with round robin implementation.
+// Load balancer with round robin implementation.
 type RoundRobinLoadBalancer struct {
-	LbConfig              config.LoadBalancerConfig
+	LbConfig            config.LoadBalancerConfig
 	currentBackendIndex int
 	m                   sync.RWMutex
 }
@@ -32,6 +30,14 @@ func (lb *RoundRobinLoadBalancer) GetBackends() ([]config.Backend, error) {
 		return nil, err
 	}
 	return con.Backends, nil
+}
+
+func parseUrl(raw string) *url.URL {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	return parsed
 }
 
 func (lb *RoundRobinLoadBalancer) GetNextPeer() (config.Backend, error) {
@@ -47,11 +53,15 @@ func (lb *RoundRobinLoadBalancer) GetNextPeer() (config.Backend, error) {
 	for i, b := range backends {
 		if i == lb.currentBackendIndex {
 			if b.IsAlive {
+				ref := &b
+				if b.ReverseProxy == nil {
+					ref.ReverseProxy = httputil.NewSingleHostReverseProxy(parseUrl(b.Url))
+				}
 				lb.m.Lock()
 				lb.currentBackendIndex = (i + 1) % len(backends)
 				lb.m.Unlock()
-				return backends[i], nil
-			} 
+				return b, nil
+			}
 			// delegate request to next server in case the selected one
 			// is not alive.
 			lb.currentBackendIndex = (i + 1) % len(backends)
@@ -75,7 +85,7 @@ func (lb *RoundRobinLoadBalancer) PingBackend(backend config.Backend) {
 	for i, b := range con.Backends {
 		if b == backend {
 			if _, err := http.Get(b.Url); err == nil {
-				b.IsAlive = true				
+				b.IsAlive = true
 			} else {
 				b.IsAlive = false
 			}
@@ -91,7 +101,7 @@ func (lb *RoundRobinLoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		w.Write(
 			JsonResponse(
-				http.StatusInternalServerError, 
+				http.StatusInternalServerError,
 				err.Error(),
 			))
 		logger.Fatal(err)
@@ -100,7 +110,7 @@ func (lb *RoundRobinLoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	backend.ReverseProxy.ServeHTTP(w, r)
 }
 
-// start http server with round robin load balancer attached
+// Savely start http server with round robin load balancer attached
 // and handle config update upon termination.
 func (lb *RoundRobinLoadBalancer) Start(addr string) {
 	con, err := lb.LbConfig.GetConfig()
@@ -111,13 +121,13 @@ func (lb *RoundRobinLoadBalancer) Start(addr string) {
 	if !con.IsAlive {
 		con.IsAlive = true
 		lb.LbConfig.SetConfig(*con)
-		
+
 		go http.ListenAndServe(addr, lb)
 		defer lb.terminate()
 
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<- c
+		<-c
 	}
 }
 
@@ -131,32 +141,15 @@ func (lb *RoundRobinLoadBalancer) terminate() {
 	lb.LbConfig.SetConfig(*con)
 }
 
-func parseUrl(raw string) *url.URL {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		logger.Fatal(err)
-	}
-	return parsed
-}
-
-func NewRoundRobinLoadBalancer(config config.LoadBalancerConfig) *RoundRobinLoadBalancer {
+func NewRoundRobinLoadBalancer(cfg config.LoadBalancerConfig) *RoundRobinLoadBalancer {
 	rrlb := &RoundRobinLoadBalancer{
-		LbConfig: config,
-		m:      sync.RWMutex{},
-	}
-	c, err := rrlb.LbConfig.GetConfig()
-	if err == nil {
-		for i := range c.Backends {
-			this := &c.Backends[i]
-			this.ReverseProxy = httputil.NewSingleHostReverseProxy(parseUrl(this.Url))
-			c.Backends[i] = *this
-		}
-		rrlb.LbConfig.SetConfig(*c)
+		LbConfig: cfg,
+		m:        sync.RWMutex{},
 	}
 	return rrlb
 }
 
-func contains(s []config.Backend, i int) bool {
+func ContainPort(s []config.Backend, i int) bool {
 	for _, b := range s {
 		if b.Port == i {
 			return true
@@ -169,43 +162,50 @@ func contains(s []config.Backend, i int) bool {
 // load balancer's backend instances.
 //
 // url is typically the protocol followed by hostname
-// e.g. http://localhost 
+// e.g. http://localhost
 func (lb *RoundRobinLoadBalancer) GeneratePort(url string) (port int, err error) {
-	cAbs, aErr := config.LBConfigAbs()
-	if aErr != nil {
-		logger.Println(aErr)
-		return -1, aErr
-	} 
-	cont, rErr := os.ReadFile(cAbs)
-	if rErr != nil {
-		logger.Println(rErr)
-		return -1, rErr
+	c, cErr := lb.LbConfig.GetConfig()
+
+	if cErr != nil {
+		return -1, cErr
 	}
-	c := &config.Config{}
-	if err := json.Unmarshal(cont, c); err != nil {
-		logger.Println(err)
-		return -1, err
+
+	if !c.IsAlive {
+		return -1, lberror.GeneratePortError("load balancer server is not alive")
 	}
+
 	ll, ul := c.PortLowerLimit, c.PortUpperLimit
 	portSize := (ul - ll) + 1
+
 	if len(c.Backends) == portSize {
 		return -1, lberror.GeneratePortError("no available port.")
 	}
+
 	ports := make([]int, 0)
+
 	for range portSize {
 		ports = append(ports, ll)
 		ll++
 	}
+
+	for i, b := range c.Backends {
+		if !b.IsAlive {
+			c.Backends[i].Url = url + ":" + fmt.Sprint(b.Port)
+			lb.LbConfig.SetConfig(*c)
+			return b.Port, nil
+		}
+	}
+
 	for _, port := range ports {
-		if !contains(c.Backends, port) {
+		if !ContainPort(c.Backends, port) {
 			new := config.Backend{
-				Url: url + ":" + fmt.Sprint(port),
+				Url:  url + ":" + fmt.Sprint(port),
 				Port: port,
 			}
 			lb.GetLbConfig().AddBackend(new)
 			// send initial signal to newly added backend.
 			go func(port int) {
-				<- time.NewTicker(time.Second * 5).C
+				<-time.NewTicker(time.Second * 5).C
 				logger.Println("<<<" + fmt.Sprint(port) + ":" + "INITIAL SIGNAL SENT>>>")
 				lb.PingBackend(new)
 			}(port)
